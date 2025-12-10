@@ -1,0 +1,55 @@
+name: Performance Report
+
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: "Branch, tag, or commit to generate the report from"
+        required: true
+        default: main
+
+concurrency:
+  group: performance-report-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  report:
+    name: Generate Performance Report
+    runs-on: macos-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v5
+        with:
+          ref: ${{ inputs.ref }}
+          fetch-depth: 0
+
+      - name: Set up Swift
+        uses: swift-actions/setup-swift@v2
+
+      - name: Run tests with coverage
+        run: swift test --enable-code-coverage
+
+      - name: Generate HTML coverage report
+        run: |
+          set -eo pipefail
+          PROFILE_PATH=$(swift test --show-codecov-path)
+          TEST_BUNDLE=$(find .build -name '*Tests.xctest' -type d | head -n 1)
+          if [ -z "$TEST_BUNDLE" ]; then
+            echo "Test bundle not found" >&2
+            exit 1
+          fi
+
+          TEST_BINARY="$TEST_BUNDLE/Contents/MacOS/$(basename "$TEST_BUNDLE" .xctest)"
+          mkdir -p coverage-html
+
+          xcrun llvm-cov show "$TEST_BINARY" \
+            -instr-profile "$PROFILE_PATH" \
+            -format=html \
+            -output-dir coverage-html
+
+      - name: Upload report
+        uses: actions/upload-artifact@v4
+        with:
+          name: performance-report
+          path: coverage-html
